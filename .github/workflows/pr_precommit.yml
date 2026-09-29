@@ -1,0 +1,72 @@
+name: PR pre-commit
+
+on:
+  push:
+    branches:
+      - main
+  pull_request_target:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.REPO_TOKEN }}
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Get changed files
+        uses: tj-actions/changed-files@v47.0.5
+        id: changed-files
+
+      - name: List changed files
+        run: echo '${{ steps.changed-files.outputs.all_changed_files }}'
+
+      # only check the full repository if PR and correctly labelled
+      - if: ${{ github.event_name != 'pull_request_target' || contains(github.event.pull_request.labels.*.name, 'full pre-commit') }}
+        name: Full pre-commit
+        uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: --all-files
+      - if: ${{ github.event_name == 'pull_request_target' && !contains(github.event.pull_request.labels.*.name, 'full pre-commit') }}
+        name: Local pre-commit
+        uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: --files ${{ steps.changed-files.outputs.all_changed_files }}
+
+      # push fixes if pre-commit fails and PR is eligible
+      - if: ${{ failure() && github.event_name == 'pull_request_target' && !github.event.pull_request.draft && !contains(github.event.pull_request.labels.*.name, 'stop pre-commit fixes') }}
+        name: Push pre-commit fixes
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: Automatic `pre-commit` fixes
+          commit_user_name: aeon-actions-bot[bot]
+
+  codespell-annotations:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.REPO_TOKEN }}
+
+      - name: Annotate locations with typos
+        uses: codespell-project/codespell-problem-matcher@v1
+
+      - name: Codespell
+        uses: codespell-project/actions-codespell@v2
